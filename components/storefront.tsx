@@ -29,7 +29,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { db, configured } from "@/lib/supabase";
-import * as demo from "@/lib/demo";
+import { isSampleShop } from "@/lib/catalogue";
 import {
   money,
   checkoutSchema,
@@ -71,10 +71,10 @@ export default function Storefront() {
   const router = useRouter();
   const params = useSearchParams();
   const [categories, setCategories] = useState<Category[]>(
-      configured ? [] : demo.categories,
+      [],
     ),
-    [shops, setShops] = useState<Shop[]>(configured ? [] : demo.shops),
-    [deals, setDeals] = useState<Deal[]>(configured ? [] : demo.deals);
+    [shops, setShops] = useState<Shop[]>([]),
+    [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(configured),
     [message, setMessage] = useState(""),
     [profile, setProfile] = useState<Profile | null>(null),
@@ -197,7 +197,7 @@ export default function Storefront() {
     if (profile?.active && path === "/account" && !params.get("recovery")) router.replace(dashboardPath);
   }, [profile?.id, profile?.role, profile?.account_type]);
   const localShops = shops.filter(
-    (s) => s.active && s.state === state && s.city === city,
+    (s) => s.active && !isSampleShop(s) && s.state === state && s.city === city,
   );
   const category = params.get("category");
   const q = (params.get("q") || "").toLowerCase();
@@ -255,7 +255,7 @@ export default function Storefront() {
     e.preventDefault();
     if (!db) {
       setMessage(
-        "Demo browsing is enabled. Connect Supabase to create an account or sign in.",
+        "Connect Supabase to create an account or sign in.",
       );
       return;
     }
@@ -415,8 +415,8 @@ export default function Storefront() {
     );
   }
   const isHome = path === "/";
-  const selectedShop = shops.find((s) => path === `/shops/${s.id}`);
-  const selectedDeal = deals.find((d) => path === `/deals/${d.id}`);
+  const selectedShop = localShops.find((s) => path === `/shops/${s.id}`);
+  const selectedDeal = available.find((d) => path === `/deals/${d.id}`);
   return (
     <>
       <header>
@@ -512,8 +512,7 @@ export default function Storefront() {
       <main>
         {!configured && (
           <div className="demo-note">
-            Demo catalogue · Connect Supabase to enable accounts, orders and
-            admin management.
+            Store listings are unavailable until Supabase is connected.
           </div>
         )}
         {message && (
@@ -595,20 +594,18 @@ export default function Storefront() {
                   })}
                 </div>
                 {section(
-                  `Featured Shops in ${city}`,
+                  `Available stores in ${city}`,
                   "/shops",
                   "View all shops",
                 )}
                 <div className="shop-grid">
                   {localShops
-                    .filter((s) => s.featured)
                     .slice(0, 5)
                     .map(shopCard)}
                 </div>
                 {!localShops.length && (
                   <p className="empty">
-                    We’re growing. There are no shops in {city} yet. Try
-                    Narsapur.
+                    No available stores in {city} yet. Please check back later.
                   </p>
                 )}
                 {section("Deals of the Day", "/deals", "View all deals")}
