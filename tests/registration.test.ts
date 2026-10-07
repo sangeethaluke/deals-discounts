@@ -1,0 +1,24 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { PGlite } from "@electric-sql/pglite";
+test("registration cannot grant merchant access without admin approval", async () => {
+ const pg=new PGlite();
+ await pg.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key,raw_user_meta_data jsonb); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon;`);
+ await pg.exec(readFileSync("supabase/schema.sql","utf8"));
+ await pg.exec(readFileSync("supabase/seed.sql","utf8"));
+ const customer="00000000-0000-4000-8000-000000000090", admin="00000000-0000-4000-8000-000000000091";
+ await pg.exec(`insert into auth.users values('${customer}','{"account_type":"merchant","role":"admin"}'),('${admin}','{}'); update profiles set role='admin' where id='${admin}'; set role authenticated; set request.jwt.claim.sub='${customer}';`);
+ await pg.query("select request_merchant_registration($1,$2,$3,$4,$5)",["Pilot footwear","00000000-0000-4000-8000-000000000001","Narsapur","Main Road","9999999999"]);
+ assert.equal((await pg.query<{account_type:string}>("select account_type from profiles")).rows[0].account_type,"merchant");
+ await assert.rejects(pg.exec("update profiles set role='merchant'"),/Administrator required/);
+ const id=(await pg.query<{id:string}>("select id from merchant_applications")).rows[0].id;
+ assert.equal((await pg.query<{role:string}>("select role from profiles")).rows[0].role,"customer");
+ await assert.rejects(pg.query("select approve_merchant_registration($1)",[id]),/Administrator required/);
+ await pg.exec(`set request.jwt.claim.sub='${admin}'`);
+ await pg.query("select approve_merchant_registration($1)",[id]);
+ assert.equal((await pg.query<{role:string}>("select role from profiles where id=$1",[customer])).rows[0].role,"merchant");
+ assert.equal((await pg.query("select id from shops where owner_id=$1",[customer])).rows.length,1);
+ await assert.rejects(pg.query("select approve_merchant_registration($1)",[id]),/Pending application required/);
+ await pg.close();
+});

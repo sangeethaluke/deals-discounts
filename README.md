@@ -111,3 +111,17 @@ The project files are implemented and locally verified, but no live Supabase pro
 Sign-in opens the dashboard for the account's role. New accounts remain customers. An administrator can change a user's role to `merchant` under Users, then edit a shop and select that shopkeeper. Merchants cannot assign ownership, feature listings, access other customers' orders, or manage other merchants' shops. Order fulfillment remains administrator-managed.
 
 For an **existing database**, run `supabase/migrations/20261001_role_dashboards.sql` once in the Supabase SQL editor. Fresh installations use `supabase/schema.sql`, which already includes this migration. Dashboards require authenticated accounts; the disconnected demo remains a browsing catalogue.
+
+## October client updates
+
+The marketplace now uses **ODAD Mart** (Only Deals and Discounts). Category discovery opens city-filtered shops with current offer counts and maximum discounts. Merchant Studio supports prices in rupees, stock, expiry, availability and camera/gallery uploads. The current application is a responsive web app for Android browsers; native Flutter/Android apps in the specifications remain separate work.
+
+For an existing database, apply `supabase/migrations/20261007_merchant_pilot.sql`, then `supabase/migrations/20261007_product_images.sql` in Supabase SQL Editor. A fresh installation includes the registration migration in `schema.sql`; apply only the product-images migration separately. Registration requests appear in Admin Console; approving one creates a shop and assigns the merchant role. This is manual business verification, not automated KYC. Pilot registrations currently use Andhra Pradesh as the shop state.
+
+The Price and margin lab estimates per-unit profit, margin, discount and break-even price and exports trial scenarios without modifying published offers. External comparison entries are manually recorded merchant observations. Amazon, Flipkart and Blinkit feeds, AI product matching, subscription billing and entitlement enforcement are not connected. No external prices are fabricated and no automatic pricing changes occur. Production market intelligence needs permissioned source adapters, product/variant matching, evidence freshness, server-side paid entitlements and a separately metered AI service. The broader payment, delivery and service-booking scope in the supplied documents remains outside these client-update changes.
+
+### Customer or merchant signup
+
+Signup asks whether the user is a customer or merchant. The choice is stored as `profiles.account_type` for onboarding navigation; it never grants permissions. The database always creates new users with `role = 'customer'`, even if signup metadata requests an admin or merchant role. Merchant applicants land on `/merchant` to submit business registration. Only administrator approval grants the merchant role and listing access.
+
+For an already installed database, run `supabase/migrations/20261008_signup_account_type.sql` once. Fresh `schema.sql` and `setup.sql` include it. Supabase email confirmation must be enabled in Auth settings; configure the allowed `/account` redirect URL for your local and deployed origins.

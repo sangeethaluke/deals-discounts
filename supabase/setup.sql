@@ -1,3 +1,6 @@
+-- ODAD Mart: run once in a FRESH Supabase project SQL Editor.
+-- Creates the application schema and photo storage; no demo inventory.
+begin;
 -- Run once in a fresh Supabase project's SQL editor.
 create table public.categories (id uuid primary key default gen_random_uuid(), name text not null unique check(length(name) between 1 and 80), icon text not null default 'store');
 create table public.shops (id uuid primary key default gen_random_uuid(), name text not null check(length(name) between 1 and 120), category_id uuid references categories on delete restrict not null, city text not null, state text not null, address text not null, description text not null default '', image text not null default '', featured boolean not null default false, restaurant boolean not null default false, active boolean not null default true);
@@ -120,6 +123,15 @@ end $$;
 revoke all on function public.request_merchant_registration(text,uuid,text,text,text),public.approve_merchant_registration(uuid) from public,anon;
 grant execute on function public.request_merchant_registration(text,uuid,text,text,text),public.approve_merchant_registration(uuid) to authenticated;
 
+-- Supabase Storage migration; run after merchant roles are installed.
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
+values('product-images','product-images',true,5242880,array['image/jpeg','image/png','image/webp']) on conflict(id) do nothing;
+create policy public_product_photos on storage.objects for select using(bucket_id='product-images');
+create policy upload_own_product_photos on storage.objects for insert to authenticated with check(
+ bucket_id='product-images' and (storage.foldername(name))[1]=auth.uid()::text
+ and exists(select 1 from public.profiles where id=auth.uid() and active and role in ('merchant','admin'))
+);
+
 -- Account type is onboarding intent only. Authorization always uses profiles.role.
 alter table public.profiles add column account_type text not null default 'customer' check(account_type in ('customer','merchant'));
 create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$
@@ -131,3 +143,17 @@ begin
  );
  return new;
 end $$;
+
+-- Starter categories only; safe to rerun and preserves existing categories.
+insert into public.categories(name,icon) values
+ ('Footwear','footprints'),
+ ('Chicken & Meat','beef'),
+ ('Clothing','shirt'),
+ ('Branded Stores','store'),
+ ('Groceries','carrot'),
+ ('Stationery','pencil'),
+ ('Snacks','cookie'),
+ ('Restaurants','utensils')
+on conflict(name) do nothing;
+
+commit;

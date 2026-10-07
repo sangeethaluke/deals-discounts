@@ -1,0 +1,17 @@
+"use client";
+import { useState } from "react";
+import { pricingScenario } from "@/lib/pricing";
+export default function PricingPilot() {
+  const [values, setValues] = useState({ normal: "1999", price: "1299", cost: "900", fees: "50", comparison: "", source: "Amazon", evidence: "", observed: "" });
+  const [saved, setSaved] = useState(false);
+  const result = pricingScenario(Number(values.price), Number(values.cost), Number(values.fees), Number(values.normal));
+  const comparison = Number(values.comparison);
+  return <section className="panel"><span className="eyebrow">PRE-LAUNCH MERCHANT PILOT</span><h2>Price and margin lab</h2><p>Try prices and discounts before publishing. Include purchase cost and all per-unit charges to estimate what you keep. This calculator does not change your offer.</p>
+    <div className="form admin-form">{([ ["normal", "Normal price (₹)"], ["price", "Trial deal price (₹)"], ["cost", "Purchase cost per unit (₹)"], ["fees", "Other costs per unit (₹)"] ] as const).map(([key,label]) => <label key={key}>{label}<input type="number" min="0" step="0.01" value={values[key]} onChange={e => { setValues({...values,[key]:e.target.value}); setSaved(false); }}/></label>)}</div>
+    {result ? <div className="dashboard-stats"><div className="panel"><span>Profit per unit</span><strong>₹{result.profit.toFixed(2)}</strong></div><div className="panel"><span>Margin / discount</span><strong>{result.margin.toFixed(1)}% / {result.discount.toFixed(1)}%</strong></div><div className="panel"><span>Break-even price</span><strong>₹{result.breakEven.toFixed(2)}</strong></div></div> : <p role="alert">Enter valid prices; the deal price must not exceed the normal price.</p>}
+    <h3>Market comparison · planned paid add-on</h3><p>Live feeds and AI matching are not connected. Record a price you have checked for the same brand, model, size and quantity, including delivery charges. These entries are merchant observations.</p>
+    <div className="form admin-form"><label>Source<select value={values.source} onChange={e=>setValues({...values,source:e.target.value})}>{["Amazon","Flipkart","Blinkit","Other"].map(s=><option key={s}>{s}</option>)}</select></label><label>Observed total price (₹)<input type="number" min="0.01" step="0.01" value={values.comparison} onChange={e=>setValues({...values,comparison:e.target.value})}/></label><label>Product link / matching details<input value={values.evidence} onChange={e=>setValues({...values,evidence:e.target.value})}/></label><label>Observed at<input type="datetime-local" value={values.observed} onChange={e=>setValues({...values,observed:e.target.value})}/></label></div>
+    {comparison > 0 && result && <p>Your trial price is ₹{Math.abs(Number(values.price)-comparison).toFixed(2)} {Number(values.price)>comparison ? "above" : "below or equal to"} the recorded price. At that comparison price, estimated profit is ₹{(comparison-Number(values.cost)-Number(values.fees)).toFixed(2)} per unit.</p>}
+    <button disabled={!result} onClick={()=>{ const blob=new Blob([JSON.stringify({ ...values, result, savedAt:new Date().toISOString() },null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="odad-mart-pricing-pilot.json"; a.click(); URL.revokeObjectURL(url); setSaved(true); }}>Export pilot scenario</button>{saved && <p role="status">Scenario exported for your pilot review.</p>}
+  </section>;
+}

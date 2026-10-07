@@ -32,6 +32,7 @@ export type Profile = {
   name: string;
   phone: string;
   role: "customer" | "merchant" | "admin";
+  account_type?: "customer" | "merchant";
   active: boolean;
 };
 export type Order = {

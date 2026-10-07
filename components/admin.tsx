@@ -9,6 +9,7 @@ import {
   type Profile,
   type Order,
 } from "@/lib/models";
+import PricingPilot from "./pricing-pilot";
 type Tab = "shops" | "categories" | "deals" | "users" | "orders";
 export default function Admin({
   categories,
@@ -29,19 +30,41 @@ export default function Admin({
     [editing, setEditing] = useState<Record<string, unknown> | null>(null),
     [users, setUsers] = useState<Profile[]>([]),
     [orders, setOrders] = useState<Order[]>([]),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [applications, setApplications] = useState<{id:string;user_id:string;name:string;city:string;address:string;phone:string;category_id:string}[]>([]),
+    [uploadedImage, setUploadedImage] = useState<string | null>(null),
+    [registrationsLoading, setRegistrationsLoading] = useState(!merchant),
+    [registrationsError, setRegistrationsError] = useState("");
   async function refresh() {
-    if (!db || merchant) return;
-    const [u, o] = await Promise.all([
-      db.from("profiles").select("*").order("name"),
-      db
-        .from("orders")
-        .select("*,order_items(*)")
-        .order("created_at", { ascending: false }),
-    ]);
-    if (u.error || o.error) notify(u.error?.message || o.error!.message);
-    setUsers(u.data || []);
-    setOrders(o.data || []);
+    if (merchant) return;
+    if (!db) {
+      setRegistrationsError("Connect Supabase to load business registrations.");
+      setRegistrationsLoading(false);
+      return;
+    }
+    setRegistrationsLoading(true);
+    setRegistrationsError("");
+    try {
+      const [u, o, requests] = await Promise.all([
+        db.from("profiles").select("*").order("name"),
+        db.from("orders").select("*,order_items(*)").order("created_at", { ascending: false }),
+        db.from("merchant_applications").select("*").eq("status", "pending"),
+      ]);
+      if (u.error || o.error) notify(u.error?.message || o.error!.message);
+      if (requests.error) {
+        setRegistrationsError(
+          ["PGRST205", "42P01"].includes(requests.error.code)
+            ? "Merchant registration tables are missing. Apply the merchant registration migration in Supabase, then refresh requests."
+            : `Unable to load registrations: ${requests.error.message}`,
+        );
+      } else setApplications(requests.data || []);
+      setUsers(u.data || []);
+      setOrders(o.data || []);
+    } catch {
+      setRegistrationsError("Unable to load registrations. Check your connection and refresh requests.");
+    } finally {
+      setRegistrationsLoading(false);
+    }
   }
   useEffect(() => {
     refresh();
@@ -81,6 +104,21 @@ export default function Admin({
         <div className="panel"><span>Active offers</span><strong>{deals.filter(d => d.active && d.stock > 0 && new Date(d.expires_at) > new Date()).length}</strong></div>
         <div className="panel"><span>{merchant ? "Low-stock offers" : "Customers"}</span><strong>{merchant ? deals.filter(d => d.stock <= 5).length : users.filter(u => u.role === "customer").length}</strong></div>
       </div>
+      {merchant && <PricingPilot />}
+      {!merchant && <section className="panel" aria-labelledby="business-registrations-heading">
+        <div className="section-heading">
+          <h2 id="business-registrations-heading">Business registrations</h2>
+          <button className="secondary" disabled={registrationsLoading || busy} onClick={refresh}>Refresh requests</button>
+        </div>
+        {registrationsLoading ? <p role="status">Loading registrations…</p>
+          : registrationsError ? <p role="alert">{registrationsError}</p>
+          : applications.length ? applications.map(a => <div key={a.id}>
+              <h3>{a.name} · {a.city}</h3>
+              <p>{categories.find(c => c.id === a.category_id)?.name} · {a.address} · {a.phone}</p>
+              <button disabled={busy} onClick={() => mutate(() => db!.rpc("approve_merchant_registration", {application_id:a.id}))}>Approve merchant and create shop</button>
+            </div>)
+          : <p>No pending business registrations. Merchants must submit “Register your business” after signing in; selecting Merchant at signup does not submit a request.</p>}
+      </section>}
       {merchant && !shops.length && <p className="empty">No shops assigned yet. Ask your marketplace administrator to assign your shop to your account.</p>}
       <div className="filters">
         {((merchant ? ["shops", "deals"] : ["shops", "categories", "deals", "users", "orders"]) as Tab[]).map(
@@ -100,7 +138,7 @@ export default function Admin({
       </div>
       {["shops", "categories", "deals"].includes(tab) && (
         <>
-          {(!merchant || (tab === "deals" && shops.length > 0)) && <button onClick={() => setEditing({})}>
+          {(!merchant || (tab === "deals" && shops.length > 0)) && <button onClick={() => { setUploadedImage(null); setEditing({}); }}>
             + Add {tab === "categories" ? "category" : tab.slice(0, -1)}
           </button>}
           <div className="table-wrap">
@@ -165,6 +203,7 @@ export default function Admin({
               const f = new FormData(e.currentTarget);
               const body: Record<string, unknown> = {};
               for (const [k, v] of f.entries()) body[k] = v;
+              if (uploadedImage) body.image = uploadedImage;
               for (const k of ["featured", "active", "restaurant"])
                 if (
                   tab !== "categories" &&
@@ -175,7 +214,7 @@ export default function Admin({
               if (merchant) delete body.featured;
               if (tab === "deals") {
                 for (const k of ["price", "original_price", "stock"])
-                  body[k] = Number(f.get(k));
+                  body[k] = k === "stock" ? Number(f.get(k)) : Math.round(Number(f.get(k)) * 100);
                 body.expires_at = new Date(
                   String(f.get("expires_at")),
                 ).toISOString();
@@ -208,8 +247,8 @@ export default function Admin({
               <label key={k}>
                 {(
                   {
-                    original_price: "Original price (paise)",
-                    price: "Offer price (paise)",
+                    original_price: "Normal price (₹)",
+                    price: "Deal price (₹)",
                     expires_at: "Offer expiry",
                     image: "Image URL (HTTPS, optional)",
                   } as Record<string, string>
@@ -219,7 +258,7 @@ export default function Admin({
                   defaultValue={
                     k === "expires_at" && editing[k]
                       ? new Date(String(editing[k])).toISOString().slice(0, 16)
-                      : String(editing[k] ?? "")
+                      : ["price", "original_price"].includes(k) && editing[k] != null ? String(Number(editing[k]) / 100) : String(editing[k] ?? "")
                   }
                   type={
                     ["price", "original_price", "stock"].includes(k)
@@ -228,7 +267,8 @@ export default function Admin({
                         ? "datetime-local"
                         : "text"
                   }
-                  min={k === "stock" ? 0 : 1}
+                  step={["price", "original_price"].includes(k) ? "0.01" : undefined}
+                  min={k === "stock" ? 0 : 0.01}
                   max={
                     ["price", "original_price"].includes(k)
                       ? 100000000
@@ -240,6 +280,7 @@ export default function Admin({
                 />
               </label>
             ))}
+            {tab !== "categories" && <label>Take or upload a product photograph<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={busy} onChange={async e => { const file=e.target.files?.[0]; if(!file || !db) return; if(file.size > 5*1024*1024 || !["image/jpeg","image/png","image/webp"].includes(file.type)) { notify("Choose a JPG, PNG or WebP under 5 MB."); return; } setBusy(true); try { const {data:{user}}=await db.auth.getUser(); if(!user) throw new Error("Sign in to upload."); const extension=file.type.split("/")[1]; const key=`${user.id}/${crypto.randomUUID()}.${extension}`; const {error}=await db.storage.from("product-images").upload(key,file); if(error) throw error; setUploadedImage(db.storage.from("product-images").getPublicUrl(key).data.publicUrl); notify("Photo uploaded. Save to attach it to your listing."); } catch(error) { notify(error instanceof Error ? error.message : "Photo upload failed."); } finally {setBusy(false);} }}/>{uploadedImage && <img src={uploadedImage} alt="Uploaded listing preview" width="160" />}</label>}
             {tab === "shops" && !merchant && <label>Shopkeeper
               <select name="owner_id" defaultValue={String(editing.owner_id || "")}>
                 <option value="">Unassigned</option>
@@ -291,7 +332,7 @@ export default function Admin({
                       name={k}
                       defaultChecked={Boolean(editing[k] ?? k === "active")}
                     />
-                    {k}
+                    {k === "active" ? "Available / published" : k}
                   </label>
                 ))}
               </>

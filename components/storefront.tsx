@@ -40,6 +40,7 @@ import {
   type Order,
 } from "@/lib/models";
 import Admin from "./admin";
+import BusinessRegistration from "./business-registration";
 const icons = [
   Footprints,
   Beef,
@@ -84,6 +85,7 @@ export default function Storefront() {
     [busy, setBusy] = useState(false),
     [open, setOpen] = useState(false),
     [mode, setMode] = useState("signin"),
+    [signupAccountType, setSignupAccountType] = useState<"customer" | "merchant">("customer"),
     [state, setState] = useState("Andhra Pradesh"),
     [city, setCity] = useState("Narsapur"),
     [query, setQuery] = useState(params.get("q") || "");
@@ -190,10 +192,10 @@ export default function Storefront() {
         });
   }, [path, profile]);
   useEffect(() => { load(); }, [profile?.id, profile?.role]);
-  const dashboardPath = profile?.role === "admin" ? "/admin" : profile?.role === "merchant" ? "/merchant" : "/customer";
+  const dashboardPath = profile?.role === "admin" ? "/admin" : (profile?.role === "merchant" || profile?.account_type === "merchant") ? "/merchant" : "/customer";
   useEffect(() => {
     if (profile?.active && path === "/account" && !params.get("recovery")) router.replace(dashboardPath);
-  }, [profile?.id, profile?.role]);
+  }, [profile?.id, profile?.role, profile?.account_type]);
   const localShops = shops.filter(
     (s) => s.active && s.state === state && s.city === city,
   );
@@ -267,7 +269,7 @@ export default function Storefront() {
         email,
         password,
         options: {
-          data: { name: f.get("name") },
+          data: { name: f.get("name"), account_type: signupAccountType },
           emailRedirectTo: window.location.origin + "/account",
         },
       }));
@@ -282,12 +284,32 @@ export default function Storefront() {
       error
         ? error.message
         : mode === "signup"
-          ? "Check your email to confirm your account."
+          ? signupAccountType === "merchant" ? "Confirm your email, then sign in to register your business. Merchant access begins after administrator approval." : "Check your email to confirm your account."
           : mode === "reset"
             ? "If an account exists, a reset email is on its way."
             : "You are signed in.",
     );
     setBusy(false);
+  }
+  async function logout() {
+    if (!db || busy) return;
+    setBusy(true);
+    try {
+      const { error } = await db.auth.signOut();
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+      setProfile(null);
+      setEmail("");
+      setOrders([]);
+      setMode("signin");
+      router.replace("/account");
+    } catch {
+      setMessage("Unable to log out. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function checkout(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -354,6 +376,7 @@ export default function Storefront() {
         <div className="card-body">
           <h3>{s.name}</h3>
           <p>{categories.find((c) => c.id === s.category_id)?.name}</p>
+          <p>{(() => { const offers = available.filter(d => d.shop_id === s.id); return offers.length ? `${offers.length} offers · Up to ${Math.max(...offers.map(d => Math.round((1-d.price/d.original_price)*100)))}% off` : "No current discounts"; })()}</p>
           <div className="card-bottom">
             <span>
               <MapPin size={13} />
@@ -402,7 +425,7 @@ export default function Storefront() {
             D<small>&</small>
             <b>D</b>
           </span>
-          <strong>Deals&Discounts</strong>
+          <strong>ODAD Mart</strong>
         </Link>
         <form className="search" onSubmit={search}>
           <Search size={20} />
@@ -465,7 +488,7 @@ export default function Storefront() {
               {label}
             </Link>
           ))}
-          {profile?.role === "merchant" && <Link href="/merchant" className={path === "/merchant" ? "active" : ""}><Store size={22} />Merchant Studio</Link>}
+          {(profile?.role === "merchant" || profile?.account_type === "merchant") && <Link href="/merchant" className={path === "/merchant" ? "active" : ""}><Store size={22} />Merchant Studio</Link>}
           {profile?.role === "admin" && (
             <Link href="/admin" className={path === "/admin" ? "active" : ""}>
               <ShieldCheck size={22} />
@@ -564,7 +587,7 @@ export default function Storefront() {
                   {categories.map((c, i) => {
                     const Icon = icons[i % icons.length];
                     return (
-                      <Link href={`/deals?category=${c.id}`} key={c.id}>
+                      <Link href={`/shops?category=${c.id}`} key={c.id}>
                         <Icon size={31} />
                         <span>{c.name}</span>
                       </Link>
@@ -599,7 +622,7 @@ export default function Storefront() {
                 <div className="page-heading">
                   <span className="eyebrow">DISCOVER YOUR NEIGHBOURHOOD</span>
                   <h1>
-                    {path === "/restaurants" ? "Restaurants" : "All shops"} in{" "}
+                    {path === "/restaurants" ? "Restaurants" : categories.find(c => c.id === category)?.name ? `${categories.find(c => c.id === category)?.name} shops` : "All shops"} in{" "}
                     {city}
                   </h1>
                   <p>Good things are closer than you think.</p>
@@ -625,7 +648,7 @@ export default function Storefront() {
                   {categories.map((c, i) => {
                     const Icon = icons[i % 8];
                     return (
-                      <Link href={`/deals?category=${c.id}`} key={c.id}>
+                      <Link href={`/shops?category=${c.id}`} key={c.id}>
                         <Icon size={36} />
                         {c.name}
                       </Link>
@@ -962,6 +985,7 @@ export default function Storefront() {
                         <button>Update password</button>
                       </form>
                     )}
+                    <BusinessRegistration categories={categories} />
                     <button
                       className="secondary"
                       onClick={async () => {
@@ -977,6 +1001,11 @@ export default function Storefront() {
                 ) : (
                   <>
                     <form className="form" onSubmit={auth}>
+                      {mode === "signup" && <fieldset><legend>I’m creating an account as a</legend>
+                        <label className="check"><input type="radio" name="account_type" value="customer" checked={signupAccountType === "customer"} onChange={() => setSignupAccountType("customer")} />Customer · browse and shop</label>
+                        <label className="check"><input type="radio" name="account_type" value="merchant" checked={signupAccountType === "merchant"} onChange={() => setSignupAccountType("merchant")} />Merchant · register my business</label>
+                        {signupAccountType === "merchant" && <p>Your email must be confirmed and your business approved before you can publish offers.</p>}
+                      </fieldset>}
                       {mode === "signup" && (
                         <label>
                           Your name
@@ -1064,10 +1093,10 @@ export default function Storefront() {
                 </div>
                 <div className="section-heading"><h2>Recent orders</h2><Link href="/orders">View all orders →</Link></div>
                 {orders.length ? orders.slice(0,3).map(o => <div className="panel order" key={o.id}><div className="section-heading"><h3>#{o.id.slice(0,8)}</h3><span className="badge">{o.status}</span></div><p>{o.order_items.map(i => `${i.title} × ${i.quantity}`).join(", ")}</p><strong>{money(o.total)}</strong></div>) : <div className="empty">Your first local find is waiting. <Link href="/deals">Browse offers →</Link></div>}
-                <div className="filters"><Link href="/cart">Open cart</Link><Link href="/account">Manage profile</Link></div>
+                <div className="filters"><Link href="/cart">Open cart</Link><Link href="/account">Manage profile</Link><button className="secondary" disabled={busy} onClick={logout}><LogOut size={16} />{busy ? "Logging out…" : "Log out"}</button></div>
               </> : <div className="empty"><h1>Customer Hub</h1><p>Sign in with an active customer account to see your orders and cart.</p><Link href={profile ? dashboardPath : "/account"}>{profile ? "Go to your dashboard" : "Sign in →"}</Link></div>
             )}
-            {path === "/merchant" && (profile?.active && profile.role === "merchant" ? <Admin key={profile.id} merchant categories={categories} shops={shops.filter(s => s.owner_id === profile.id)} deals={deals.filter(d => shops.some(s => s.id === d.shop_id && s.owner_id === profile.id))} reload={load} notify={setMessage} /> : <div className="empty"><Store size={36} /><h1>Merchant Studio</h1><p>An active shopkeeper account is required. Your administrator can assign your role and shop.</p><Link href="/account">Sign in →</Link></div>)}
+            {path === "/merchant" && (profile?.active && profile.role === "merchant" ? <Admin key={profile.id} merchant categories={categories} shops={shops.filter(s => s.owner_id === profile.id)} deals={deals.filter(d => shops.some(s => s.id === d.shop_id && s.owner_id === profile.id))} reload={load} notify={setMessage} /> : <div className="empty"><Store size={36} /><h1>Merchant onboarding</h1>{profile?.active ? <BusinessRegistration categories={categories} /> : <><p>Sign in to register your business. Your administrator must approve it before you can publish offers.</p><Link href="/account">Sign in →</Link></>}</div>)}
             {path === "/admin" &&
               (profile?.active && profile.role === "admin" ? (
                 <Admin
@@ -1099,7 +1128,7 @@ export default function Storefront() {
           </>
         )}
         <footer>
-          <strong>Deals&Discounts</strong>
+          <strong>ODAD Mart</strong>
           <span>Discover local. Save every day.</span>
           <span>₹ INR · Pay on collection</span>
         </footer>
